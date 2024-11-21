@@ -105,7 +105,7 @@ app.post('/login', async (req, res) => {
 // Chat routes
 
 // Get messages between sender and receiver
-app.get('/chat/:sender/:receiver', authenticate, async (req, res) => {
+app.get('/chat/:sender/:receiver',async (req, res) => {
   const { sender, receiver } = req.params;
   try {
     const messages = await Chat.find({
@@ -118,7 +118,7 @@ app.get('/chat/:sender/:receiver', authenticate, async (req, res) => {
 });
 
 // Send a new message
-app.post('/chat', authenticate, async (req, res) => {
+app.post('/chat', async (req, res) => {
   const { sender, receiver, content } = req.body;
   try {
     const newMessage = new Chat({ sender, receiver, content });
