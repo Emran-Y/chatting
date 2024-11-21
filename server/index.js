@@ -7,6 +7,12 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const app = express();
+
+app.get('/', (req, res) => {
+  res.send('Hello World');
+});
+
+
 const server = require('http').createServer(app);
 const io = socketIo(server, {
   cors: {
@@ -59,6 +65,11 @@ const chatSchema = new mongoose.Schema(
 const Chat = mongoose.model('Chat', chatSchema);
 
 // Authentication middleware
+
+
+
+
+
 const authenticate = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(401).json({ message: 'No token, authorization denied' });
