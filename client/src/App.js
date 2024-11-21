@@ -54,7 +54,7 @@ const App = () => {
       await axios.post(`${API_URL}/chat`, messageData, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setChatHistory((prev) => [...prev, { ...messageData, from: "You" }]);
+      // setChatHistory((prev) => [...prev, { ...messageData, from: "You" }]);
       setMessage("");
     } catch (error) {
       console.error("Error sending message:", error);
@@ -130,7 +130,7 @@ const App = () => {
 const styles = {
   container: { maxWidth: "500px", margin: "0 auto", textAlign: "center", padding: "20px" },
   loginForm: { display: "flex", flexDirection: "column", alignItems: "center" },
-  input: { margin: "10px 0", padding: "10px", width: "80%", borderRadius: "5px", border: "1px solid #ccc" },
+  input: { margin: "10px 10px", padding: "10px", width: "80%", borderRadius: "5px", border: "1px solid #ccc" },
   button: { padding: "10px 20px", borderRadius: "5px", border: "none", backgroundColor: "#007bff", color: "white" },
   inputGroup: { margin: "10px 0", display: "flex", justifyContent: "space-between", alignItems: "center" },
   chatBox: { marginTop: "20px", padding: "10px", border: "1px solid #ccc", borderRadius: "5px", height: "300px", overflowY: "scroll" },
