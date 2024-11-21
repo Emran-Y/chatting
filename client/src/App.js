@@ -40,7 +40,7 @@ const App = () => {
       const response = await axios.get(`${API_URL}/chat/${username}/${recipient}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setChatHistory(response.data);
+      setChatHistory(prev => response.data);
     } catch (error) {
       console.error("Error fetching chat history:", error);
     }
