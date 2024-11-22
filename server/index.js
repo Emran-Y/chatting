@@ -125,6 +125,35 @@ const getMessagesFromDynamoDb = async (sender, recipient) => {
   }
 };
 
+// Fetch list of users with whom a user has had a chat before
+const getChatPartners = async (user) => {
+  const params = {
+    TableName: 'homedispo_chat_messages_v2',
+    FilterExpression: 'sender = :user OR recipient = :user',
+    ExpressionAttributeValues: {
+      ':user': user,
+    },
+  };
+
+  try {
+    // Scan the table for chat messages where the user is either sender or recipient
+    const result = await documentClient.scan(params).promise();
+
+    const users = new Set();
+
+    // Extract chat partners from sender and recipient columns
+    (result.Items || []).forEach((item) => {
+      if (item.sender !== user) users.add(item.sender);
+      if (item.recipient !== user) users.add(item.recipient);
+    });
+
+    return [...users];
+  } catch (err) {
+    console.error('Error fetching chat partners:', err);
+    throw new Error('Failed to fetch chat partners');
+  }
+};
+
 
 
 // Get messages route
@@ -133,6 +162,17 @@ app.get('/chat/:sender/:recipient', async (req, res) => {
     const { sender, recipient } = req.params;
     const messages = await getMessagesFromDynamoDb(sender, recipient);
     res.json(messages);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get list of chat partners for a specific user
+app.get('/chat-partners/:user', async (req, res) => {
+  try {
+    const { user } = req.params;
+    const partners = await getChatPartners(user);
+    res.json(partners);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -209,9 +249,8 @@ const generateUuid = () => {
 };
 
 // Start the server
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, async () => {
+  await createChatTable(); // Ensure the DynamoDB table is created before the app starts
   console.log(`Server running on port ${PORT}`);
-  // Ensure the table is created when the server starts
-  await createChatTable();
 });

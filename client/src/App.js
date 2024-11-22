@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { io } from "socket.io-client";
 
-const API_URL = "http://localhost:8000";
+const API_URL ="http://localhost:3000"
 const socket = io(API_URL);
 
 const App = () => {
