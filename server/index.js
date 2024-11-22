@@ -1,17 +1,34 @@
 require('dotenv').config();
 const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
+const AWS = require('aws-sdk');
 const socketIo = require('socket.io');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const cors = require('cors');
+
+// Initialize DynamoDB
+AWS.config.update({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.REGION_NAME, // Ensure this matches the region of your DynamoDB table
+});
+
+const dynamoDb = new AWS.DynamoDB(); // Using the low-level DynamoDB client for table creation
+const documentClient = new AWS.DynamoDB.DocumentClient(); // Using DocumentClient for interacting with records
 
 const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Middleware for error handling
+const errorHandler = (err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send('Something went wrong!');
+};
+
+app.use(errorHandler);
 
 app.get('/', (req, res) => {
   res.send('Hello World');
 });
-
 
 const server = require('http').createServer(app);
 const io = socketIo(server, {
@@ -21,113 +38,120 @@ const io = socketIo(server, {
   },
 });
 
-// MongoDB connection
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/chat', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-  .then(() => console.log('MongoDB connected'))
-  .catch((err) => console.log(err));
+// Create DynamoDB table if not exists
+const createChatTable = async () => {
+  const params = {
+    TableName: 'homedispo_chat_messages_v2',
+    KeySchema: [
+      { AttributeName: 'PK', KeyType: 'HASH' }, // Partition key
+      { AttributeName: 'SK', KeyType: 'RANGE' }, // Sort key
+    ],
+    AttributeDefinitions: [
+      { AttributeName: 'PK', AttributeType: 'S' }, // String for sender and recipient
+      { AttributeName: 'SK', AttributeType: 'S' }, // String for message_id
+    ],
+    ProvisionedThroughput: {
+      ReadCapacityUnits: 5,
+      WriteCapacityUnits: 5,
+    },
+  };
 
-// Middlewares
-app.use(cors());
-app.use(express.json());
-
-// User schema (inline)
-const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-});
-
-userSchema.pre('save', async function (next) {
-  if (this.isModified('password')) {
-    this.password = await bcrypt.hash(this.password, 10);
+  try {
+    const data = await dynamoDb.createTable(params).promise();
+    console.log('Table created successfully:', data);
+  } catch (err) {
+    if (err.code === 'ResourceInUseException') {
+      console.log('Table already exists');
+    } else {
+      console.error('Error creating table:', err);
+    }
   }
-  next();
-});
-
-userSchema.methods.comparePassword = function (password) {
-  return bcrypt.compare(password, this.password);
 };
 
-const User = mongoose.model('User', userSchema);
-
-// Chat schema (inline)
-const chatSchema = new mongoose.Schema(
-  {
-    sender: { type: String, required: true },
-    receiver: { type: String, required: true },
-    content: { type: String, required: true },
-  },
-  { timestamps: true }
-);
-
-const Chat = mongoose.model('Chat', chatSchema);
-
-// Authentication middleware
-
-
-
-
-
-// Routes
-
-// Login route
-app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
+// Helper function to add message to DynamoDB
+const addMessageToDynamoDb = async (sender, recipient, message, timestamp, messageId) => {
+  const params = {
+    TableName: 'homedispo_chat_messages_v2',
+    Item: {
+      PK: `${sender}#${recipient}`,
+      SK: messageId,
+      sender,
+      recipient,
+      message,
+      timestamp,
+      messageId,
+    },
+  };
 
   try {
-    let user = await User.findOne({ username });
-
-    // If user doesn't exist, create a new one
-    if (!user) {
-      user = new User({ username, password });
-      await user.save();
-      console.log(`New user created: ${username}`);
-    } else {
-      // If user exists, verify the password
-      const match = await user.comparePassword(password);
-      if (!match) return res.status(400).json({ message: 'Invalid password' });
-    }
-
-    // Generate JWT token
-    const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, {
-      expiresIn: '1h',
-    });
-
-    res.json({ token });
+    await documentClient.put(params).promise();
+    console.log('Message added successfully');
   } catch (err) {
-    console.error('Error during login:', err);
-    res.status(500).json({ message: 'Error during login' });
+    console.error('Error adding message to DynamoDB:', err);
+    throw new Error('Failed to add message to DynamoDB');
   }
-});
+};
 
-// Chat routes
+const getMessagesFromDynamoDb = async (sender, recipient) => {
+  const params1 = {
+    TableName: 'homedispo_chat_messages_v2',
+    KeyConditionExpression: 'PK = :pk',
+    ExpressionAttributeValues: {
+      ':pk': `${sender}#${recipient}`,
+    },
+  };
 
-// Get messages between sender and receiver
-app.get('/chat/:sender/:receiver',async (req, res) => {
-  const { sender, receiver } = req.params;
+  const params2 = {
+    TableName: 'homedispo_chat_messages_v2',
+    KeyConditionExpression: 'PK = :pk',
+    ExpressionAttributeValues: {
+      ':pk': `${recipient}#${sender}`,
+    },
+  };
+
   try {
-    const messages = await Chat.find({
-      $or: [{ sender, receiver }, { sender: receiver, receiver: sender }],
-    }).sort('createdAt');
+    // Query the first set of messages (sender -> recipient)
+    const result1 = await documentClient.query(params1).promise();
+    // Query the second set of messages (recipient -> sender)
+    const result2 = await documentClient.query(params2).promise();
+
+    // Combine the results from both queries
+    const allMessages = [...(result1.Items || []), ...(result2.Items || [])];
+
+    return allMessages;
+  } catch (err) {
+    console.error('Error getting messages from DynamoDB:', err);
+    throw new Error('Failed to retrieve messages from DynamoDB');
+  }
+};
+
+
+
+// Get messages route
+app.get('/chat/:sender/:recipient', async (req, res) => {
+  try {
+    const { sender, recipient } = req.params;
+    const messages = await getMessagesFromDynamoDb(sender, recipient);
     res.json(messages);
   } catch (err) {
-    res.status(500).json({ message: 'Error fetching messages' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Send a new message
+// Send message route
 app.post('/chat', async (req, res) => {
-  const { sender, receiver, content } = req.body;
   try {
-    const newMessage = new Chat({ sender, receiver, content });
-    await newMessage.save();
-    // Emit message to receiver if they're online
-    io.emit('chat message', { sender, receiver, content, createdAt: newMessage.createdAt });
-    res.status(201).json(newMessage);
+    const { sender, recipient, message } = req.body;
+    const timestamp = Date.now();
+    const messageId = generateUuid(); // Generate a UUID for the message
+
+    await addMessageToDynamoDb(sender, recipient, message, timestamp, messageId);
+    console.log(`Message sent from ${sender} to ${recipient}: ${message}`);
+    io.emit('chat message', { sender, recipient, message, timestamp });
+
+    res.status(201).json({ message: 'Message sent' });
   } catch (err) {
-    res.status(500).json({ message: 'Error sending message' });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -137,21 +161,29 @@ let activeUsers = {};
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
-  // Store active users in memory
+  // Store active users
   socket.on('join', (username) => {
     activeUsers[username] = socket.id;
     console.log(`${username} joined with socket ID: ${socket.id}`);
   });
 
-  // Handle new messages
-  socket.on('chat message', async ({ sender, receiver, content }) => {
-    const newMessage = new Chat({ sender, receiver, content });
-    await newMessage.save();
+  // Handle incoming messages
+  socket.on('chat message', async ({ sender, recipient, message }) => {
+    const timestamp = Date.now();
+    const messageId = generateUuid();
 
-    // Emit message to receiver if they're online
-    const recipientSocketId = activeUsers[receiver];
-    if (recipientSocketId) {
-      io.to(recipientSocketId).emit('chat message', { sender, content });
+    // Save to DynamoDB
+    try {
+      await addMessageToDynamoDb(sender, recipient, message, timestamp, messageId);
+      console.log(`Message from ${sender} to ${recipient}: ${message}`);
+
+      // Emit message to recipient if they are online
+      const recipientSocketId = activeUsers[recipient];
+      if (recipientSocketId) {
+        io.to(recipientSocketId).emit('chat message', { sender, recipient, message, timestamp });
+      }
+    } catch (err) {
+      console.error('Error handling chat message:', err);
     }
   });
 
@@ -167,8 +199,19 @@ io.on('connection', (socket) => {
   });
 });
 
+// Helper function to generate UUID (for message IDs)
+const generateUuid = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 // Start the server
 const PORT = process.env.PORT || 8000;
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+  // Ensure the table is created when the server starts
+  await createChatTable();
 });

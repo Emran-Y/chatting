@@ -16,6 +16,7 @@ const App = () => {
 
   useEffect(() => {
     socket.on("chat message", (messageData) => {
+      console.log("Received message:", messageData);
       setChatHistory((prev) => [...prev, messageData]);
     });
 
@@ -24,9 +25,9 @@ const App = () => {
 
   const handleLogin = async () => {
     try {
-      const response = await axios.post(`${API_URL}/login`, { username, password });
-      const { token } = response.data;
-      setToken(token);
+      // const response = await axios.post(`${API_URL}/login`, { username, password });
+      // const { token } = response.data;
+      // setToken(token);
       setIsLoggedIn(true);
       socket.emit("join", username);
     } catch (error) {
@@ -37,9 +38,7 @@ const App = () => {
   const fetchChatHistory = async () => {
     if (!recipient) return;
     try {
-      const response = await axios.get(`${API_URL}/chat/${username}/${recipient}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.get(`${API_URL}/chat/${username}/${recipient}`);
       setChatHistory(prev => response.data);
     } catch (error) {
       console.error("Error fetching chat history:", error);
@@ -48,12 +47,10 @@ const App = () => {
 
   const handleSendMessage = async () => {
     if (!message || !recipient) return;
-    const messageData = { sender: username, receiver: recipient, content: message };
+    const messageData = { sender: username, recipient: recipient, message: message };
 
     try {
-      await axios.post(`${API_URL}/chat`, messageData, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await axios.post(`${API_URL}/chat`, messageData)
       // setChatHistory((prev) => [...prev, { ...messageData, from: "You" }]);
       setMessage("");
     } catch (error) {
@@ -117,7 +114,7 @@ const App = () => {
                 key={index}
                 style={chat.sender === username ? styles.messageFromMe : styles.messageFromThem}
               >
-                <strong>{chat.sender === username ? "You" : chat.sender}:</strong> {chat.content}
+                <strong>{chat.sender === username ? "You" : chat.sender}:</strong> {chat.message}
               </div>
             ))}
           </div>
